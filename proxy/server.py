@@ -49,7 +49,7 @@ for directory in [IMAGE_DIR, PDF_DIR, CONVERTED_DIR]:
 
 
 VLLM_URL = os.getenv("VLLM_URL")
-VLLM_TIMEOUT = float(os.getenv("VLLM_TIMEOUT", "120"))
+VLLM_TIMEOUT = float(os.getenv("VLLM_TIMEOUT", "30")) #default 30 sec
 
 
 
@@ -57,12 +57,46 @@ VLLM_TIMEOUT = float(os.getenv("VLLM_TIMEOUT", "120"))
 # Allowed file types
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".bmp"}
 ALLOWED_PDF_EXTENSION = ".pdf"
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
+SYSTEM_PROMPT = "You are a helpful assistant."
+
+'''
+You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**.
+'''
+
+'''
+
+PERSONAL_DOC (PASSPORT, ID, MILITARY ID)
+	firstName: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	middleName: z.string().optional(),
+	surname: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	gender: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	country: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	documentType: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	documentNumber: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	birthDate: z.date(Errors.REQUIRED),
+
+
+KRA PIN (BUSINESS OR INDIVIDUAL)
+	pin: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	email: z.email(Errors.INVALID_EMAIL),
+	phone: z.string(Errors.REQUIRED).regex(PHONE_REGEX, Errors.INVALID_PHONE),
+	postalAddress: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	postalCode: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+  
+
+Certificate of Registration/Incorporations
+	businessName: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	country: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	documentType: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+	documentNumber: z.string(Errors.REQUIRED).min(1, Errors.REQUIRED),
+
+'''
 
 DOC_TYPE_TEMPLATES = {  
-  'DT0002': 'NATIONAL_ID',
+  'DT0002': 'Extract data in json format', 
   'DT0049': 'PASSPORT',
   'DT0081': 'MILITARY_ID',
   'DT0030': 'CERT_OF_REGISTRATION',
@@ -76,6 +110,23 @@ DOC_TYPE_TEMPLATES = {
   'DT0078':	'SHARES_CERTIFICATE',
   'DT0079':	'ALLOTMENT_LETTER'
 }
+
+
+
+'''
+DT0002 - NATIONAL_ID
+DT0049 - PASSPORT
+DT0081 - MILITARY_ID
+DT0030 - CERT_OF_REGISTRATION
+DT0075 - CERT_OF_INCORPORATIONS
+DT0074 - BUSINESS KRA PIN 
+DT0083 - INDIVIDUAL KRA PIN
+DT0076 - TITLE_DEED 
+DT0077 - LEASE_AGREEMENT
+DT0078 - SHARES_CERTIFICATE
+DT0079 - ALLOTMENT_LETTER
+'''
+
 
 
 def validate_file_size(file: UploadFile) -> bool:
@@ -147,6 +198,12 @@ def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[Image.Image]:
 
 async def analyze_images(images: List[str], doc_type: str) -> dict:
     
+    if doc_type not in DOC_TYPE_TEMPLATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported document type"
+        )
+
     try:
         image_contents = []
         for img in images:
@@ -157,9 +214,11 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 }
             })
         
+        print(image_contents)
         # Construct the prompt based on doc_type
-        prompt = f"Analyze this {doc_type} document and extract all relevant information. Provide a structured summary of the key details found in the document."
-        
+        prompt = DOC_TYPE_TEMPLATES[doc_type]
+
+
         # Build messages
         messages = [
             {
@@ -167,7 +226,7 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 "content": [
                     {
                         "type": "text", 
-                        "text": "You are a helpful assistant."
+                        "text": SYSTEM_PROMPT
                     }
                 ]
             },
@@ -245,12 +304,6 @@ async def process_file(
                 status_code=400,
                 detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024)}MB"
             )
-        
-        if doc_type not in DOC_TYPE_TEMPLATES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported document type"
-            )
 
         images_to_analyze: List[str] = []
         task_uuid = uuid.uuid4()
@@ -322,3 +375,8 @@ async def health_check():
         "upload_directory": str(UPLOAD_DIR.absolute()),
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=6060)
