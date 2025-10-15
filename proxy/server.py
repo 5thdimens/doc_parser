@@ -69,9 +69,40 @@ SYSTEM_PROMPT = "You are a helpful assistant."
 You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**.
 '''
 
+'''
+{
+  "model": "your-openai-compatible-model-name",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "**[YOUR FULL PROMPT/INSTRUCTIONS FROM STEP 3 GO HERE]**\n\nFor example: \"You are a helpful AI assistant. Always follow these rules: 1. Use concise language. 2. Output must be valid JSON only. Analyze the provided image and identify the main product and its price.\""
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,**[YOUR_BASE64_ENCODED_IMAGE_STRING_GOES_HERE]**"
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024,
+  "temperature": 0.1,
+  
+  // *** OPTIONAL: To force JSON output (if supported by the server/model) ***
+  "response_format": {
+    "type": "json_object"
+  }
+}
 
 
+You must first encode your image file (e.g., JPEG, PNG) into a Base64 string. This string then replaces [YOUR_BASE64_ENCODED_IMAGE_STRING_GOES_HERE] and is prefixed with the Data URL mime type (data:image/jpeg;base64, or data:image/png;base64,).
 
+
+'''
 
 class PersonalDocType(str, Enum):
     passport = "passport"
