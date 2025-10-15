@@ -229,7 +229,7 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
 
 
 @app.post("/process")
-@limiter.limit("1/minute")
+#@limiter.limit("1/minute")
 async def process_file(
     request: Request,
     file: UploadFile = File(...),
@@ -322,8 +322,3 @@ async def health_check():
         "upload_directory": str(UPLOAD_DIR.absolute()),
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
