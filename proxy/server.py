@@ -16,6 +16,9 @@ import time
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
+from enum import Enum
+
 
 
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +68,47 @@ SYSTEM_PROMPT = "You are a helpful assistant."
 '''
 You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**.
 '''
+
+
+
+
+
+class PersonalDocType(str, Enum):
+    passport = "passport"
+    national_id = "national_id"
+    military_id = "military_id"
+    defence_forces = "defence_forces"
+
+
+class KraDocType(str, Enum):
+    business = "business"
+    individual = "individual"
+
+
+class OwnershipDocType(str, Enum):
+    title_deed = "title_deed"
+    lease_agreement = "lease_agreement"
+    shares_certificate = "shares_certificate"
+    allotment_letter = "allotment_letter"
+
+class CertificateDocType(str, Enum):
+    registration = "registration"
+    incorporations = "incorporations"
+
+
+
+class PersonalDocument(BaseModel):
+    firstName: str
+    middleName: str
+    surname: str
+    gender: str
+    country: str
+    documentType: PersonalDocType
+    documentNumber: str
+    birthDate: str
+
+
+#https://docs.vllm.ai/en/v0.8.2/features/structured_outputs.html
 
 '''
 
@@ -248,8 +292,13 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
             "Accept": "application/json",
         }
         
+        json_schema = PersonalDocument.model_json_schema()
+
         payload = {
             "messages": messages,
+            "extra_body": {
+                "guided_json": json_schema
+            }
         }
         
         async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
