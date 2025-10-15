@@ -21,6 +21,7 @@ from enum import Enum
 
 
 
+LOG_LEVEL=os.getenv("LOG_LEVEL", "ERROR")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -291,8 +292,8 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
         
         print(image_contents)
         # Construct the prompt based on doc_type
-        prompt = DOC_TYPE_TEMPLATES[doc_type]
-
+        #prompt = DOC_TYPE_TEMPLATES[doc_type]
+        prompt = "what is the capital of the world?"
 
         # Build messages
         messages = [
@@ -312,10 +313,12 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                         "type": "text",
                         "text": prompt
                     },
-                    *image_contents
+                    #*image_contents
                 ]
             }
         ]
+
+
         
         # Make API request
         headers = {
@@ -347,6 +350,44 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 )
             
             result = response.json()
+
+            '''
+            {
+                'id': 'chatcmpl-09d1b5bfb937420097e118f09c9a6dca',
+                'object': 'chat.completion',
+                'created': 1760552858,
+                'model': 'google/gemma-3-1b-it',
+                'choices': [{
+                    'index': 0,
+                    'message': {
+                        'role': 'assistant',
+                        'content': 'That\'s a fantastic and delightfully tricky question! There isn\'t one single, official "capital of the world." It\'s a really interesting concept! \n\nHowever, if you\'re looking for the most commonly cited and historically significant answer, it’s **Paris, France.** \n\nIt’s become a popular symbol of global influence and a frequent topic of discussion. \n\nBut, it’s worth noting that it\'s a bit of a playful answer! 😊',
+                        'refusal': None,
+                        'annotations': None,
+                        'audio': None,
+                        'function_call': None,
+                        'tool_calls': [],
+                        'reasoning_content': None
+                    },
+                    'logprobs': None,
+                    'finish_reason': 'stop',
+                    'stop_reason': 106,
+                    'token_ids': None
+                }],
+                'service_tier': None,
+                'system_fingerprint': None,
+                'usage': {
+                    'prompt_tokens': 24,
+                    'total_tokens': 124,
+                    'completion_tokens': 100,
+                    'prompt_tokens_details': None
+                },
+                'prompt_logprobs': None,
+                'prompt_token_ids': None,
+                'kv_transfer_params': None
+            }
+
+            '''
             
             return {
                 "analysis": result["choices"][0]["message"]["content"],
