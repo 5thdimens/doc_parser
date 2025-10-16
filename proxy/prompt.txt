@@ -1,87 +1,29 @@
-.... structure 
 
-<start_of_turn>user
+messages = [
+    {
+        "role": "system",
+        "content": [{"type": "text", "text": "You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**."}]
+    },
+    {
+        "role": "user",
+        "content": [
 
-**[YOUR FULL INSTRUCTION/SYSTEM PROMPT CONTENT GOES HERE]**
-* (e.g., "You are a reliable JSON generator. Output only valid JSON.")
-* (e.g., "The JSON structure must be: {'key': 'data_type'}")
-
-**[YOUR SPECIFIC TASK/QUERY]**
-* (e.g., "Analyze the image and extract the product name and price.")
-
-**[VISUAL DATA (Image)]**
-* (This is inserted by the VLM pipeline, often as a tokenized representation of the image.)
-
-<end_of_turn>
-<start_of_turn>model
-
-
-
-
-
-
-
-
-
-
-
-
-
-.... example
-
-<start_of_turn>user
-You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**.
-
-Based on the image, extract the object type, count, main color, and a confidence score.
-
+            {"type": "image", "image": "https://waagacusub.net/uploads/article/photo/IMG_3BDDB5-1C7765-24BCDF-AA7642-01219E-75AA64.png"},
+            {"type": "text", "text": '''
 You MUST return your output in the following JSON format:
 {
-  "object_type": "string (e.g., 'dog', 'sandwich', 'stop sign')",
-  "count": "integer",
-  "main_color": "string",
-  "confidence_score": "float (on a scale of 0.0 to 1.0)"
+	"document_type": "string ('passport' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"country": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"passport_number": "string (alphanumeric characters)",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
 }
 
-Please analyze this image and generate the JSON. 
-
-[Image of a red fire truck]
-
-<end_of_turn>
-<start_of_turn>model
-
-
-
-
-
-
-
-
-
-..... request
-{
-  "model": "your-openai-compatible-model-name",
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "**[YOUR FULL PROMPT/INSTRUCTIONS FROM STEP 3 GO HERE]**\n\nFor example: \"You are a helpful AI assistant. Always follow these rules: 1. Use concise language. 2. Output must be valid JSON only. Analyze the provided image and identify the main product and its price.\""
-        },
-        {
-          "type": "image_url",
-          "image_url": {
-            "url": "data:image/jpeg;base64,**[YOUR_BASE64_ENCODED_IMAGE_STRING_GOES_HERE]**"
-          }
-        }
-      ]
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+            '''}
+            
+        ]
     }
-  ],
-  "max_tokens": 1024,
-  "temperature": 0.1,
-  
-  // *** OPTIONAL: To force JSON output (if supported by the server/model) ***
-  "response_format": {
-    "type": "json_object"
-  }
-}
+]
