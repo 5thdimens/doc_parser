@@ -18,7 +18,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from enum import Enum
-
+from prompt_map import collection
 
 
 LOG_LEVEL=os.getenv("LOG_LEVEL", "ERROR")
@@ -66,44 +66,6 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 SYSTEM_PROMPT = "You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**."
 
-
-#https://github.com/QwenLM/Qwen3-VL/tree/main?tab=readme-ov-file
-
-
-
-class PersonalDocType(str, Enum):
-    passport = "passport"
-    national_id = "national_id"
-    military_id = "military_id"
-    defence_forces = "defence_forces"
-
-
-class KraDocType(str, Enum):
-    business = "business"
-    individual = "individual"
-
-
-class OwnershipDocType(str, Enum):
-    title_deed = "title_deed"
-    lease_agreement = "lease_agreement"
-    shares_certificate = "shares_certificate"
-    allotment_letter = "allotment_letter"
-
-class CertificateDocType(str, Enum):
-    registration = "registration"
-    incorporations = "incorporations"
-
-
-
-class PersonalDocument(BaseModel):
-    firstName: str
-    middleName: str
-    surname: str
-    gender: str
-    country: str
-    documentType: PersonalDocType
-    documentNumber: str
-    birthDate: str
 
 
 #https://docs.vllm.ai/en/v0.8.2/features/structured_outputs.html
@@ -240,7 +202,7 @@ def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[Image.Image]:
 
 async def analyze_images(images: List[str], doc_type: str) -> dict:
     
-    if doc_type not in DOC_TYPE_TEMPLATES:
+    if doc_type not in collection:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported document type"
@@ -256,10 +218,7 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 }
             })
         
-        print(image_contents)
-        # Construct the prompt based on doc_type
-        #prompt = DOC_TYPE_TEMPLATES[doc_type]
-        prompt = "what is the capital of the world?"
+        prompt = collection[doc_type].prompt
 
         # Build messages
         messages = [

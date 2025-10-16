@@ -18,6 +18,10 @@ services:
       interval: 60s
       timeout: 10s
       retries: 5
+    logging:
+      options:
+        max-size: 50mb
+        max-file: 100
     restart: unless-stopped
 
   
@@ -25,8 +29,7 @@ services:
     image: vllm/vllm-openai:latest
     container_name: vllm_gemma
     command: >
-      #      --model=google/gemma-3-1b-it
-      --model=Qwen/Qwen3-VL-4B-Instruct-FP8
+      --model=google/gemma-3-1b-it
       --tensor-parallel-size=1
       --gpu-memory-utilization=0.95
       --max-num-seqs=1

@@ -1,5 +1,16 @@
 
 
+class Document:
+    def __init__(self, doc_type, prompt):
+        self.doc_type = doc_type
+        self.prompt = prompt
+
+class DocumentCollection:
+    def __init__(self, documents):
+        for key, doc_data in documents.items():
+            setattr(self, key, Document(doc_data['doc_type'], doc_data['prompt']))
+
+
 
 passport = '''
 You MUST return your output in the following JSON format:
@@ -108,9 +119,29 @@ Please analyze this image and generate the JSON. In case a field is missing, fie
 owner_ship_cert = '''
 You MUST return your output in the following JSON format:
 {
-    "document_type": "string ('title_deed', 'lease_agreement', 'share_certificate', 'allotment_letter' or 'other')",
+    "document_type": "string ('title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter' or 'other')",
     "confidence_score": "float (on a scale of 0.0 to 1.0)"
 }
 
 Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
 '''
+
+
+
+
+documents_data = {
+    "DT0002": {"doc_type": "kenya_national_id", "prompt": national_id},
+    "DT0049": {"doc_type": "passport", "prompt": passport},
+    "DT0081": {"doc_type": "military_id", "prompt": military_id},
+    "DT0030": {"doc_type": "certificate_of_registration", "prompt": cert_of_reg},
+    "DT0075": {"doc_type": "certificate_of_incorporation", "prompt": cert_of_incorp},
+    "DT0074": {"doc_type": "kra_pin", "prompt": kra_pin},
+    "DT0083": {"doc_type": "kra_pin", "prompt": kra_pin},
+    "DT0076": {"doc_type": "title_deed", "prompt": owner_ship_cert},
+    "DT0077": {"doc_type": "lease_agreement", "prompt": owner_ship_cert},
+    "DT0078": {"doc_type": "shares_certificate", "prompt": owner_ship_cert},
+    "DT0079": {"doc_type": "allotment_letter", "prompt": owner_ship_cert},
+}
+collection = DocumentCollection(documents_data)
+
+
