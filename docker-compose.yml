@@ -36,7 +36,7 @@ services:
     volumes:
       - hf_cache:/root/.cache/huggingface
     environment:
-      - HUGGING_FACE_HUB_TOKEN=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
+      - HUGGING_FACE_HUB_TOKEN=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
       - VLLM_LOGGING_LEVEL=DEBUG
     ipc: host
     deploy:

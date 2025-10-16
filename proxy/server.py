@@ -18,7 +18,173 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 from enum import Enum
-from prompt_map import collection
+import json
+
+
+passport = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('passport' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"country": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"passport_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+national_id = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kenya_national_id' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"id_number": "string (usualy 8 digit number)",
+    "serial_number": "string (usually 9 digit number)",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+military_id = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('military_id' or 'other')",
+	"name": "string",
+    "service_number": "string",
+    "rank": "string",
+    "service": "string",
+    "height": "string",
+    "blood_group": "string",
+    "national_id": "string (usualy 8 digit number)",
+    "date_of_issue": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+
+kra_pin = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kra_pin' or 'other')",
+	"pin": "string",
+    "email": "string",
+    "phone": "string",
+    "po_box": "string",
+    "postal_code": "string",
+    "county": "string",
+    "district": "string",
+    "city": "string",
+    "street": "string",
+    "building": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+cert_of_reg = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('certificate_of_registration' or 'other')",
+	"business_name": "string",
+    "country": "string",
+    "registration_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+cert_of_incorp = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('certificate_of_incorporation' or 'other')",
+	"business_name": "string",
+    "country": "string",
+    "registration_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+
+owner_ship_cert = '''
+You MUST return your output in the following JSON format:
+{
+    "document_type": "string ('title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter' or 'other')",
+    "confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+collection = {
+    "DT0002": {
+        "doc_type": "kenya_national_id", 
+        "prompt": national_id
+    },
+    "DT0049": {
+        "doc_type": "passport", 
+        "prompt": passport
+    },
+    "DT0081": {
+        "doc_type": "military_id", 
+        "prompt": military_id
+    },
+    "DT0030": {
+        "doc_type": "certificate_of_registration", 
+        "prompt": cert_of_reg
+    },
+    "DT0075": {
+        "doc_type": "certificate_of_incorporation", 
+        "prompt": cert_of_incorp
+    },
+    "DT0074": {
+        "doc_type": "kra_pin", 
+        "prompt": kra_pin
+    },
+    "DT0083": {
+        "doc_type": "kra_pin", 
+        "prompt": kra_pin
+    },
+    "DT0076": {
+        "doc_type": "title_deed", 
+        "prompt": owner_ship_cert
+    },
+    "DT0077": {
+        "doc_type": "lease_agreement", 
+        "prompt": owner_ship_cert
+    },
+    "DT0078": {
+        "doc_type": "shares_certificate", 
+        "prompt": owner_ship_cert
+    },
+    "DT0079": {
+        "doc_type": "allotment_letter", 
+        "prompt": owner_ship_cert
+    },
+}
+
+
 
 
 LOG_LEVEL=os.getenv("LOG_LEVEL", "ERROR")
@@ -47,14 +213,16 @@ IMAGE_DIR = UPLOAD_DIR / "images"
 PDF_DIR = UPLOAD_DIR / "pdfs"
 CONVERTED_DIR = UPLOAD_DIR / "converted"
 
+
+
 # Create directories
 for directory in [IMAGE_DIR, PDF_DIR, CONVERTED_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
 
+
 VLLM_URL = os.getenv("VLLM_URL")
 VLLM_TIMEOUT = float(os.getenv("VLLM_TIMEOUT", "30")) #default 30 sec
-
 
 
 
@@ -99,37 +267,6 @@ Certificate of Registration/Incorporations
 
 '''
 
-DOC_TYPE_TEMPLATES = {  
-  'DT0002': 'Extract data in json format', 
-  'DT0049': 'PASSPORT',
-  'DT0081': 'MILITARY_ID',
-  'DT0030': 'CERT_OF_REGISTRATION',
-  'DT0075': 'CERT_OF_INCORPORATIONS',
-  
-  'DT0074': 'BUSINESS KRA PIN', 
-  'DT0083': 'INDIVIDUAL KRA PIN',
-
-  'DT0076': 'TITLE_DEED', 
-  'DT0077':	'LEASE_AGREEMENT',
-  'DT0078':	'SHARES_CERTIFICATE',
-  'DT0079':	'ALLOTMENT_LETTER'
-}
-
-
-
-'''
-DT0002 - NATIONAL_ID
-DT0049 - PASSPORT
-DT0081 - MILITARY_ID
-DT0030 - CERT_OF_REGISTRATION
-DT0075 - CERT_OF_INCORPORATIONS
-DT0074 - BUSINESS KRA PIN 
-DT0083 - INDIVIDUAL KRA PIN
-DT0076 - TITLE_DEED 
-DT0077 - LEASE_AGREEMENT
-DT0078 - SHARES_CERTIFICATE
-DT0079 - ALLOTMENT_LETTER
-'''
 
 
 
@@ -218,7 +355,7 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 }
             })
         
-        prompt = collection[doc_type].prompt
+        prompt = collection.get(doc_type).get("prompt")
 
         # Build messages
         messages = [
@@ -242,8 +379,6 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 ]
             }
         ]
-
-
         
         # Make API request
         headers = {
@@ -251,13 +386,8 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
             "Accept": "application/json",
         }
         
-        json_schema = PersonalDocument.model_json_schema()
-
         payload = {
             "messages": messages,
-            "extra_body": {
-                "guided_json": json_schema
-            }
         }
         
         async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
@@ -275,71 +405,12 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                 )
             
             result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            if content.startswith("```json") and content.endswith("```"):
+                content = content[8:-4]
+            response = json.loads(content)
 
-            '''
-            {
-                'id': 'chatcmpl-09d1b5bfb937420097e118f09c9a6dca',
-                'object': 'chat.completion',
-                'created': 1760552858,
-                'model': 'google/gemma-3-1b-it',
-                'choices': [{
-                    'index': 0,
-                    'message': {
-                        'role': 'assistant',
-                        'content': 'That\'s a fantastic and delightfully tricky question! There isn\'t one single, official "capital of the world." It\'s a really interesting concept! \n\nHowever, if you\'re looking for the most commonly cited and historically significant answer, it’s **Paris, France.** \n\nIt’s become a popular symbol of global influence and a frequent topic of discussion. \n\nBut, it’s worth noting that it\'s a bit of a playful answer! 😊',
-                        'refusal': None,
-                        'annotations': None,
-                        'audio': None,
-                        'function_call': None,
-                        'tool_calls': [],
-                        'reasoning_content': None
-                    },
-                    'logprobs': None,
-                    'finish_reason': 'stop',
-                    'stop_reason': 106,
-                    'token_ids': None
-                }],
-                'service_tier': None,
-                'system_fingerprint': None,
-                'usage': {
-                    'prompt_tokens': 24,
-                    'total_tokens': 124,
-                    'completion_tokens': 100,
-                    'prompt_tokens_details': None
-                },
-                'prompt_logprobs': None,
-                'prompt_token_ids': None,
-                'kv_transfer_params': None
-            }
-
-            '''
-
-
-            '''
-            ```json
-            {
-                "document_type": "kra_pin",
-                "pin": "A011546187F",
-                "email": "YVONNEMULI@GMAIL.COM",
-                "phone": "",
-                "po_box": "95",
-                "postal_code": "90137",
-                "county": "Nairobi",
-                "district": "Nijru District",
-                "city": "nairobi",
-                "street": "Mwki road",
-                "building": "Kasarani",
-                "confidence_score": 0.95
-            }
-            ```
-            '''
-            
-            return {
-                "analysis": result["choices"][0]["message"]["content"],
-                "model": result["model"],
-                "usage": result.get("usage", {}),
-                "finish_reason": result["choices"][0]["finish_reason"]
-            }
+            return response
             
     except httpx.TimeoutException:
         logger.error("API request timed out")
@@ -484,13 +555,11 @@ async def process_file(
         processing_time = end_time - start_time
 
         result = {}
-        result["analysis"] = vllm_result
-        result["processing_time"] = processing_time
-        
+        result[doc_type] = vllm_result
 
         return JSONResponse(content={
             "success": True,
-            "message": f"File processed and analyzed successfully as {doc_type}",
+            "processing_time": processing_time,
             "result": result
         })
 
