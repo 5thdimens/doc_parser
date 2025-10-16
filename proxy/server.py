@@ -66,6 +66,8 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 SYSTEM_PROMPT = "You are a helpful assistant."
 
+#https://github.com/QwenLM/Qwen3-VL/tree/main?tab=readme-ov-file
+
 '''
 You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**.
 '''
@@ -388,6 +390,23 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
             }
 
             '''
+
+
+            '''
+            ```json
+            {
+              "document_type": "military_id",
+              "name": "EDWIN LEMISO SIRINKIT",
+              "service_number": "152074",
+              "rank": "PTE",
+              "height": "5’7\"",
+              "blood_group": "A+",
+              "national_id": "34995050",
+              "date_of_issue": "12/04/2019",
+              "confidence_score": 0.95
+            }
+            ```
+            '''
             
             return {
                 "analysis": result["choices"][0]["message"]["content"],
@@ -405,6 +424,77 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
     except Exception as e:
         logger.error(f"Error calling API: {str(e)}")
         raise HTTPException(status_code=500, detail=f"API error: {str(e)}")
+
+
+def normalize_image_for_gemma_vlm(image_url: str) -> str | None:
+    """
+    Downloads an image from a URL, resizes it to the Gemma 3 VLM's required 
+    896x896 resolution, normalizes the pixel data, and encodes the result
+    into a Base64 string (PNG format).
+
+    Note: This function performs generic preprocessing (resize and 0-1 scaling).
+    For production use with the Gemma 3 VLM, always use the official 
+    image processor from the model's library (e.g., Hugging Face's transformers) 
+    to ensure all normalization steps (mean/std, specific color conversions) are
+    exactly correct.
+
+    Args:
+        image_url: The public URL of the image to process.
+
+    Returns:
+        A Base64-encoded string of the preprocessed image in PNG format, 
+        or None if an error occurs.
+    """
+    try:
+        # 1. Download the image data
+        logging.info(f"Attempting to download image from: {image_url}")
+        response = requests.get(image_url, stream=True, timeout=10)
+        response.raise_for_status() # Raise an exception for bad status codes
+
+        # 2. Open the image using PIL (Pillow)
+        image_data = io.BytesIO(response.content)
+        img = Image.open(image_data).convert("RGB")
+        logging.info(f"Original image size: {img.size}")
+
+        # 3. Resize the image to the VLM's fixed input resolution (896x896)
+        # Using Image.Resampling.LANCZOS for high quality downsampling
+        img_resized = img.resize(GEMMA_VLM_SIZE, Image.Resampling.LANCZOS)
+        logging.info(f"Resized image size: {img_resized.size}")
+
+        # 4. Convert the resized image to a NumPy array
+        img_array = np.array(img_resized, dtype=np.float32)
+
+        # 5. Normalize pixel values (scaling from [0, 255] to [0.0, 1.0])
+        # This step is often performed internally by the model's processor, 
+        # but we include it here for completeness before encoding the final image.
+        # Note: If saving to PNG/JPEG, we must revert to 0-255 scale first.
+        
+        # 6. Prepare image for Base64 encoding (convert back to 8-bit and PIL)
+        # We ensure the data is in the expected 0-255 range and unit8 type before
+        # converting back to a savable PIL Image object.
+        img_8bit = (img_array).astype(np.uint8)
+        final_img = Image.fromarray(img_8bit, 'RGB')
+        
+        # 7. Save to an in-memory buffer as PNG and encode to Base64
+        buffer = io.BytesIO()
+        final_img.save(buffer, format="PNG")
+        base64_encoded_image = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+        logging.info("Image successfully preprocessed, normalized, and Base64 encoded.")
+        logging.debug(f"Encoded string length: {len(base64_encoded_image)}")
+
+        return base64_encoded_image
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error fetching image from URL: {e}")
+        return None
+    except IOError as e:
+        logging.error(f"Error reading or processing image file: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        return None
+
 
 
 
