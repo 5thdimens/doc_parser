@@ -10,9 +10,6 @@ services:
       - VLLM_TIMEOUT=30 #seconds
       - VLLM_URL=http://vllm:8000/v1/chat/completions
       - LOG_LEVEL=DEBUG
-    #depends_on:
-    #  vllm:
-    #    condition: service_healthy 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6060/health"]
       interval: 60s
@@ -23,39 +20,65 @@ services:
         max-size: 50mb
         max-file: 100
     restart: unless-stopped
-
-  
-  vllm:
-    image: vllm/vllm-openai:latest
-    container_name: vllm_gemma
-    command: >
-      --model=google/gemma-3-1b-it
-      --tensor-parallel-size=1
-      --gpu-memory-utilization=0.95
-      --max-num-seqs=1
-    volumes:
-      - hf_cache:/root/.cache/huggingface
+    networks:
+      - default_network
+      - internal_network
+    
+  weather:
+    build: ./weather_service
+    container_name: weather_service
+    #ports:
+    #  - "8001:8001"
     environment:
-      - HUGGING_FACE_HUB_TOKEN=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
-      - VLLM_LOGGING_LEVEL=DEBUG
-    ipc: host
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu] 
+      - WEATHERAPI_KEY=586cab5ad7d94d8380d172603252610
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 60s
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
       timeout: 10s
-      retries: 5
-    logging:
-      options:
-        max-size: 50mb
-        max-file: 100
+      retries: 3
     restart: unless-stopped
+    networks:
+      - internal_network
+  
+  # vllm:
+  #   image: vllm/vllm-openai:latest
+  #   container_name: vllm_gemma
+  #   command: >
+  #     --model=google/gemma-3-1b-it
+  #     --tensor-parallel-size=1
+  #     --gpu-memory-utilization=0.95
+  #     --max-num-seqs=1
+  #   volumes:
+  #     - hf_cache:/root/.cache/huggingface
+  #   environment:
+  #     - HUGGING_FACE_HUB_TOKEN=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
+  #     - VLLM_LOGGING_LEVEL=DEBUG
+  #   ipc: host
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu] 
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  #     interval: 60s
+  #     timeout: 10s
+  #     retries: 5
+  #   logging:
+  #     options:
+  #       max-size: 50mb
+  #       max-file: 100
+  #   restart: unless-stopped
+  # 
+
 
 volumes:
   hf_cache:
+
+networks:
+  default_network:
+    driver: bridge
+  internal_network:
+    internal: true

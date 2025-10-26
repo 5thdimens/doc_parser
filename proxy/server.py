@@ -391,10 +391,16 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
         }
         
         async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
+            '''
             response = await client.post(
                 VLLM_URL,
                 headers=headers,
                 json=payload
+            )
+            '''
+            response = await client.get(
+                "http://weather:8001/weather",
+                headers=headers
             )
             
             if response.status_code != 200:
@@ -404,11 +410,11 @@ async def analyze_images(images: List[str], doc_type: str) -> dict:
                     detail=f"API error: {response.text}"
                 )
             
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
+            response = response.json()
+            '''content = result["choices"][0]["message"]["content"]
             if content.startswith("```json") and content.endswith("```"):
                 content = content[8:-4]
-            response = json.loads(content)
+            response = json.loads(content)'''
 
             return response
             
@@ -554,13 +560,11 @@ async def process_file(
         end_time = time.perf_counter()
         processing_time = end_time - start_time
 
-        result = {}
-        result[doc_type] = vllm_result
-
+        
         return JSONResponse(content={
             "success": True,
             "processing_time": processing_time,
-            "result": result
+            "result": vllm_result
         })
 
     except HTTPException as er:
@@ -575,12 +579,12 @@ async def process_file(
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {
+    return JSONResponse(content={
         "status": "healthy",
         "service": "file-upload-api",
         "upload_directory": str(UPLOAD_DIR.absolute()),
         "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
-    }
+    })
 
 
 if __name__ == "__main__":
