@@ -21,6 +21,34 @@ from enum import Enum
 import json
 
 
+system = "You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information."
+
+user = """
+You are an expert document processing assistant. Analyze the provided image of a personal identification document (e.g., passport, national ID, or driver's license) and extract the following information **only if clearly visible and legible**. Return your response **strictly as a valid JSON object** with the fields below. If a field is not present or unreadable, use `null`.
+
+Fields to extract:
+- document_type: one of ["passport", "national_id", "driver_license", "military_id", "other"]
+- full_name
+- document_number
+- national_id
+- nationality
+- date_of_birth
+- issue_date
+- expiry_date
+- gender
+- issuing_country
+- issuing_authority
+- confidence: float (on a scale of 0.0 to 1.0)
+
+Do not invent or guess any values. Only extract what is explicitly shown in the document.
+"""
+
+
+
+
+
+
+
 passport = '''
 You MUST return your output in the following JSON format:
 {
@@ -306,7 +334,7 @@ def image_to_base64(file: UploadFile) -> str:
 def pil_image_to_base64(image: Image) -> str:
     try:
         buffer = BytesIO()
-        image.save(buffer, format="PNG")
+        image.save(buffer, format="JPEG")
         img_bytes = buffer.getvalue()
         return base64.b64encode(img_bytes).decode('utf-8')
     except Exception as e:
@@ -321,8 +349,8 @@ def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[Image.Image]:
         bytes = buffer.getvalue()
         images = pdf2image.convert_from_bytes(
             bytes,
-            dpi=300,
-            fmt='png'
+            dpi=200,
+            fmt='jpeg'
         )
         
         # Limit to max_pages if specified

@@ -37,6 +37,7 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    ipc: host
     networks:
       - internal_network
   
