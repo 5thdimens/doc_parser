@@ -136,7 +136,7 @@ for directory in [INVALID_DIR, ERROR_DIR]:
 VLLM_URL: str = os.getenv("VLLM_URL", "http://vllm:8000/v1/chat/completions")
 VLLM_TIMEOUT: float = float(os.getenv("VLLM_TIMEOUT", "30")) #default 30 sec
 SAVE_INVALID_FILES: bool = os.getenv("SAVE_INVALID_FILES", "true") == "true"
-
+MAX_IMAGES: int = int(os.getenv("MAX_IMAGES", "5"))
 
 # Allowed file types
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".bmp", ".pdf"}
@@ -244,6 +244,9 @@ def pil_image_to_base64(image: Image) -> str:
         image = ImageOps.autocontrast(image, cutoff=2)
         if image.mode != 'RGB':
             image = image.convert('RGB')
+
+        width, height = image.size
+        logger.info(f"Image size: {width} x {height}")
 
         buffer = BytesIO()
         image.save(buffer, format="JPEG")
@@ -361,6 +364,7 @@ def get_date(arg):
     except Exception as e:
         logger.error(f"Failed to convert date {arg}: {str(e)}", exc_info=True)
 
+    logger.info(f"Invalid date: {arg}")
     return None
 
 
@@ -825,7 +829,7 @@ async def process_file(
             images_to_analyze.append(f"data:image/bmp;base64,{base64}")
 
         elif file_ext == ".pdf":
-            images_to_analyze = pdf_to_images(file, max_pages=5)
+            images_to_analyze = pdf_to_images(file, max_pages=MAX_IMAGES)
 
         else:
             raise HTTPException(
