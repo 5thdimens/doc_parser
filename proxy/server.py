@@ -459,12 +459,25 @@ def get_national_id_data(response: dict) -> dict:
     first, middle, last = get_name(response.get("name"))
     gender = get_gender(response.get("gender"))
     date_of_birth = get_date(response.get("date_of_birth"))
-    id_number = get_id_number(response.get("id_number"))
+    id = get_id_number(response.get("id_number"))
+    serial = get_id_number(response.get("serial_number"))
     confidence_score = get_score(response.get("confidence_score"))
     country = response.get("country")
     if isinstance(country, str) and "ken" not in country.lower():
         return None
 
+    #since VLM struggles with IDNO detection, additional validation is needed for id and serial
+    id_number = None
+    if isinstance(id, str) and len(id) >= 7 and len(id) <= 14:
+        id_number = id
+
+    if isinstance(serial, str) and len(serial) >= 7 and len(serial) <= 14:
+        if id_number is None:
+            id_number = serial
+        elif len(id_number) > len(serial):
+            id_number = serial
+
+    
     if id_number is None or len(id_number) < 7 or len(id_number) > 14:
         return None
 

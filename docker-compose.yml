@@ -46,7 +46,7 @@ services:
     volumes:
       - doc_parser_hf_cache:/root/.cache/huggingface
     environment:
-      - HUGGING_FACE_HUB_TOKEN=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
+      - HUGGING_FACE_HUB_TOKEN=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
       #- VLLM_LOGGING_LEVEL=DEBUG
       #- VLLM_USE_FLASHINFER_SAMPLER=0
       - TEMPERATURE=0.0
