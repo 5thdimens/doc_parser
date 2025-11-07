@@ -10,7 +10,7 @@ import pdf2image
 import logging
 import base64
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 import time
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -327,6 +327,7 @@ def get_date(arg):
             date = re.sub(r'[^a-zA-Z0-9 \.\-/]', '', arg)
             if bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date)):
                 dt = datetime.strptime(date, "%Y-%m-%d")
+                dt = dt.replace(tzinfo=timezone.utc)
                 return int(dt.timestamp()) * 1000
 
             date = date.lower()
@@ -359,12 +360,12 @@ def get_date(arg):
 
             date = date.replace(" ", ".").replace("-", ".").replace("/", ".")
             dt = datetime.strptime(date, "%d.%m.%Y")
+            dt = dt.replace(tzinfo=timezone.utc)
             return int(dt.timestamp()) * 1000
 
     except Exception as e:
         logger.error(f"Failed to convert date {arg}: {str(e)}", exc_info=True)
 
-    logger.info(f"Invalid date: {arg}")
     return None
 
 
