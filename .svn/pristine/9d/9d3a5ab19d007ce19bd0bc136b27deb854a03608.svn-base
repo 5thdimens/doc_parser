@@ -1,0 +1,768 @@
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List, Optional
+import os
+import uuid
+from pathlib import Path
+from PIL import Image
+import pdf2image
+import logging
+import base64
+import httpx
+from datetime import datetime
+from io import BytesIO
+import time
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
+from enum import Enum
+import json
+from typing import Optional
+import re
+
+
+PASSPORT = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('passport' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"country": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"passport_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+NATIONAL_ID = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kenya_national_id' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"id_number": "string (usualy 8 digit number)",
+    "serial_number": "string (usually 9 digit number)",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+MILITARY_ID = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('military_id' or 'other')",
+	"name": "string",
+    "service_number": "string",
+    "rank": "string",
+    "service": "string",
+    "height": "string",
+    "blood_group": "string",
+    "national_id": "string (usualy 8 digit number)",
+    "date_of_issue": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+KRA_PIN = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kra_pin' or 'other')",
+	"pin": "string",
+    "email": "string",
+    "phone": "string",
+    "po_box": "string",
+    "postal_code": "string",
+    "county": "string",
+    "district": "string",
+    "city": "string",
+    "street": "string",
+    "building": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+CERT_OF_REG = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('certificate_of_registration' or 'other')",
+	"business_name": "string",
+    "country": "string",
+    "registration_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+CERT_OF_INCORP = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('certificate_of_incorporation' or 'other')",
+	"business_name": "string",
+    "country": "string",
+    "registration_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+
+OWNERSHIP_CERT = '''
+You MUST return your output in the following JSON format:
+{
+    "document_type": "string ('title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter' or 'other')",
+    "confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+collection = {
+    "DT0002": {
+        "doc_type": "kenya_national_id", 
+        "prompt": NATIONAL_ID
+    },
+    "DT0049": {
+        "doc_type": "passport", 
+        "prompt": PASSPORT
+    },
+    "DT0081": {
+        "doc_type": "military_id", 
+        "prompt": MILITARY_ID
+    },
+    "DT0030": {
+        "doc_type": "certificate_of_registration", 
+        "prompt": CERT_OF_REG
+    },
+    "DT0075": {
+        "doc_type": "certificate_of_incorporation", 
+        "prompt": CERT_OF_INCORP
+    },
+    "DT0074": {
+        "doc_type": "kra_pin", 
+        "prompt": KRA_PIN
+    },
+    "DT0083": {
+        "doc_type": "kra_pin", 
+        "prompt": KRA_PIN
+    },
+    "DT0076": {
+        "doc_type": "title_deed", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0077": {
+        "doc_type": "lease_agreement", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0078": {
+        "doc_type": "shares_certificate", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0079": {
+        "doc_type": "allotment_letter", 
+        "prompt": OWNERSHIP_CERT
+    },
+}
+
+
+request_count = 0
+valid_count = 0
+invalid_count = 0
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configuration
+UPLOAD_DIR = Path("uploads")
+INVALID_DIR = UPLOAD_DIR / "invalid"
+ERROR_DIR = UPLOAD_DIR / "error"
+
+
+# Create directories
+for directory in [INVALID_DIR, ERROR_DIR]:
+    directory.mkdir(parents=True, exist_ok=True)
+
+
+
+VLLM_URL: str = os.getenv("VLLM_URL", "http://localhost:8000/v1/chat/completions")
+VLLM_TIMEOUT: float = float(os.getenv("VLLM_TIMEOUT", "30")) #default 30 sec
+SAVE_INVALID_FILES: bool = os.getenv("SAVE_INVALID_FILES", "true") == "true"
+
+
+# Allowed file types
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".bmp"}
+ALLOWED_PDF_EXTENSION = ".pdf"
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+SYSTEM_PROMPT = "You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**."
+
+
+def validate_file_size(file: UploadFile) -> bool:
+    """Validate file size"""
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    return file_size <= MAX_FILE_SIZE
+
+
+def get_file_extension(filename: str) -> str:
+    """Get file extension in lowercase"""
+    return Path(filename).suffix.lower()
+
+
+def save_uploaded_file(file: UploadFile, filename: str):
+    """Save uploaded file with unique name"""
+    
+    try:
+        file_path = INVALID_DIR / filename
+        with open(file_path, "wb") as buffer:
+          buffer.write(file.file.read())
+
+    except Exception as e:
+        logger.error(f"Failed to save uploaded file {filename}: {str(e)}")
+
+    remove_files_older_than(INVALID_DIR)
+
+def remove_files_older_than(directory, days=30):
+    
+    try:
+        cutoff_time = time.time() - (days * 24 * 60 * 60)
+
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+
+            if os.path.isfile(filepath):
+                file_mod_time = os.path.getmtime(filepath)
+
+                if file_mod_time < cutoff_time:
+                    os.remove(filepath)
+                    logger.info(f"Removed: {filepath}")
+                    
+    except Exception as e:
+        logger.error(f"Failed to clean invalid files: {str(e)}")
+
+def image_to_base64(file: UploadFile) -> str:
+    try:
+        return base64.b64encode(file.file.read()).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error encoding image: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Image encoding failed: {str(e)}")
+
+
+def pil_image_to_base64(image: Image) -> str:
+    try:
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        img_bytes = buffer.getvalue()
+        return base64.b64encode(img_bytes).decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error encoding image: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Image encoding failed: {str(e)}")
+
+
+def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[str]:
+    
+    try:
+        buffer = BytesIO()
+        file.save(buffer)
+        bytes = buffer.getvalue()
+        images = pdf2image.convert_from_bytes(
+            bytes,
+            dpi=300,
+            fmt='png'
+        )
+        
+        # Limit to max_pages if specified
+        if max_pages:
+            images = images[:max_pages]
+
+        if len(images) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unable to process PDF file"
+            )
+
+        result = []
+        for img in images:
+            base64 = pil_image_to_base64(img)
+            result.append(f"data:image/png;base64,{base64}")
+
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error converting PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF conversion failed: {str(e)}")
+
+
+
+
+
+def get_gender(arg):
+    if isinstance(arg, str):
+      if arg.lower().startswith("f") or "fem" in arg.lower():
+        return "FEMALE"
+      elif arg.lower().startswith("m") or "male" in arg.lower():
+        return "MALE"
+    return None
+
+
+def get_score(arg):
+    if arg is None:
+        return None
+    try:
+        return float(arg)
+    except (ValueError, TypeError):
+        return None
+
+
+def get_doc_number(arg):
+    if isinstance(arg, str):
+        return re.sub(r'[^a-zA-Z0-9]', '', arg)
+    return None
+
+
+def get_date(arg):
+
+    try:
+        if isinstance(arg, str):
+            date = re.sub(r'[^a-zA-Z0-9 \.-]', '', arg)
+            alpha = re.sub(r'[^a-zA-Z]', '', date).lower()
+            if alpha:
+                if alpha.startswith('jan') or 'jan' in alpha:
+                    date = date.replace(alpha, "01")
+                elif alpha.startswith('feb') or 'feb' in alpha:
+                    date = date.replace(alpha, "02")
+                elif alpha.startswith('mar') or 'mar' in alpha:
+                    date = date.replace(alpha, "03")
+                elif alpha.startswith('apr') or 'apr' in alpha:
+                    date = date.replace(alpha, "04")
+                elif alpha.startswith('may') or 'may' in alpha:
+                    date = date.replace(alpha, "05")
+                elif alpha.startswith('jun') or 'jun' in alpha:
+                    date = date.replace(alpha, "06")
+                elif alpha.startswith('jul') or 'jul' in alpha:
+                    date = date.replace(alpha, "07")
+                elif alpha.startswith('aug') or 'aug' in alpha:
+                    date = date.replace(alpha, "08")
+                elif alpha.startswith('sep') or 'sep' in alpha:
+                    date = date.replace(alpha, "09")
+                elif alpha.startswith('oct') or 'oct' in alpha:
+                    date = date.replace(alpha, "10")
+                elif alpha.startswith('nov') or 'nov' in alpha:
+                    date = date.replace(alpha, "11")
+                elif alpha.startswith('dec') or 'dec' in alpha:
+                    date = date.replace(alpha, "12")
+
+            date = date.replace(" ", ".").replace("-", ".")
+            dt = datetime.strptime(date, "%d.%m.%Y")
+            return int(dt.timestamp()) * 1000
+
+    except Exception as e:
+        logger.error(f"Failed to convert date {arg}: {str(e)}")
+
+    return None
+
+
+def get_country(arg):
+    if isinstance(arg, str):
+        return re.sub(r'[^a-zA-Z]', '', arg).upper()
+    return None
+
+
+def get_po_box(arg):
+    if isinstance(arg, str):
+        return f"P.O Box ${arg}"
+    return None
+
+
+def get_postal_code(arg):
+    if isinstance(arg, str):
+        return re.sub(r'[^0-9]', '', arg)
+    return None
+
+
+def get_name(name):
+    first = ""
+    middle = ""
+    last = ""
+    if isinstance(name, str):
+        parts = name.split(" ")
+        if len(parts) == 1:
+          first = parts[0].strip()
+        elif len(parts) == 2:
+          first = parts[0].strip()
+          last = parts[1].strip()
+        elif len(parts) == 3:
+          first = parts[0].strip()
+          middle = parts[1].strip()
+          last = parts[2].strip()
+        elif len(parts) > 3:
+          first = parts[0].strip()
+          middle = parts[1].strip()
+          last = " ".join(parts[2:])
+
+    return first, middle, last
+
+
+
+
+def get_passport_data(response: dict) -> dict:
+
+    first, middle, last = get_name(response.get("name"))
+    gender = get_gender(response.get("gender"))
+    country = get_country(response.get("country"))
+    dateOfBirth = get_date(response.get("date_of_birth"))
+    passportNumber = get_doc_number(response.get("passport_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
+
+    return {
+        "firstName": first,
+        "middleName": middle,
+        "lastName": last,
+        "documentNumber": passportNumber,
+        "documentType": "30000CUSDO",
+        "country": country,
+        "gender": gender,
+        "birthDate": dateOfBirth,
+        "confidenceScore": confidenceScore
+    }
+
+
+def get_national_id_data(response: dict) -> dict:
+
+    first, middle, last = get_name(response.get("name"))
+    gender = get_gender(response.get("gender"))
+    dateOfBirth = get_date(response.get("date_of_birth"))
+    idNumber = get_doc_number(response.get("id_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
+
+    return {
+        "firstName": first,
+        "middleName": middle,
+        "lastName": last,
+        "documentNumber": idNumber,
+        "documentType": "20000CUSDO",
+        "country": "KENYA",
+        "gender": gender,
+        "birthDate": dateOfBirth,
+        "confidenceScore": confidenceScore
+    }
+
+
+def get_military_id_data(response: dict) -> dict:
+
+    first, middle, last = get_name(response.get("name"))
+    idNumber = get_doc_number(response.get("national_id"))
+    confidenceScore = get_score(response.get("confidence_score"))
+
+    return {
+        "firstName": first,
+        "middleName": middle,
+        "lastName": last,
+        "documentNumber": idNumber,
+        "documentType": "40000CUSDO",
+        "country": "KENYA",
+        "gender": "MALE",
+        "birthDate": None,
+        "confidenceScore": confidenceScore
+    }
+
+
+def get_reg_certificate_data(response: dict) -> dict:
+
+    businessName = response.get("business_name")
+    country = get_country(response.get("country"))
+    registrationNumber = get_doc_number(response.get("registration_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
+
+    return {
+        "businessName": businessName,
+        "documentNumber": registrationNumber,
+        "documentType": "60000CUSDO",
+        "country": country,
+        "confidenceScore": confidenceScore
+    }
+
+
+def get_inc_certificate_data(response: dict) -> dict:
+
+    businessName = response.get("business_name")
+    country = get_country(response.get("country"))
+    registrationNumber = get_doc_number(response.get("registration_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
+
+    return {
+        "businessName": businessName,
+        "documentNumber": registrationNumber,
+        "documentType": "61000CUSDO",
+        "country": country,
+        "confidenceScore": confidenceScore
+    }
+
+
+def get_kra_pin_data(response: dict) -> dict:
+
+    confidenceScore = get_score(response.get("confidence_score"))
+    kraPin = get_doc_number(response.get("pin"))
+    email = response.get("email")
+    phone = response.get("phone")
+    poBox = get_po_box(response.get("po_box"))
+    postalCode = get_postal_code(response.get("postal_code"))
+
+    return {
+        "kraPin": kraPin,
+        "email": email,
+        "phone": phone,
+        "poBox": poBox,
+        "postalCode": postalCode,
+        "county": response.get("county"),
+        "district": response.get("district"),
+        "city": response.get("city"),
+        "street": response.get("street"),
+        "building": response.get("building"),
+        "confidenceScore": confidenceScore
+    }
+
+
+async def analyze_images(images: List[str], doc_type: str) -> dict:
+
+    try:
+        image_contents = []
+        for img in images:
+            image_contents.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": img
+                }
+            })
+        
+        prompt = collection.get(doc_type).get("prompt")
+        valid_doc_type = collection.get(doc_type).get("doc_type")
+
+        messages = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text", 
+                        "text": SYSTEM_PROMPT
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    *image_contents
+                ]
+            }
+        ]
+        
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        
+        payload = {
+            "messages": messages,
+        }
+        
+        async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
+            response = await client.post(
+                VLLM_URL,
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"API error: {response.status_code} - {response.text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"API error: status code {response.status_code}"
+                )
+            
+            result = response.json()
+            
+            content = result["choices"][0]["message"]["content"]
+            if content.startswith("```json") and content.endswith("```"):
+                content = content[8:-4]
+
+            response = json.loads(content)
+
+            vllm_doc_type = response.get("document_type")
+            isValid = vllm_doc_type == valid_doc_type
+            extracted_data = None
+            if isValid:
+                if valid_doc_type == "passport":
+                    extracted_data = get_passport_data(response)
+
+                elif valid_doc_type == "kenya_national_id":
+                    extracted_data = get_national_id_data(response)
+
+                elif valid_doc_type == "military_id":
+                    extracted_data = get_military_id_data(response)
+
+                elif valid_doc_type == "kra_pin":
+                    extracted_data = get_kra_pin_data(response)
+
+                elif valid_doc_type == "certificate_of_registration":
+                    extracted_data = get_reg_certificate_data(response)
+
+                elif valid_doc_type == "certificate_of_incorporation":
+                    extracted_data = get_inc_certificate_data(response)
+
+                elif valid_doc_type in ['title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter']:
+                    extracted_data = {}
+
+            return extracted_data
+            
+    except httpx.TimeoutException:
+        logger.error("API request timed out")
+        raise HTTPException(status_code=504, detail="API request timed out")
+    except httpx.RequestError as e:
+        logger.error(f"API request failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"API request failed")
+    except Exception as e:
+        logger.error(f"Error calling API: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"API error")
+
+
+@app.post("/process")
+#@limiter.limit("1/minute")
+async def process_file(
+    request: Request,
+    file: UploadFile = File(...),
+    doc_type: str = Form(...)
+):
+    global request_count, invalid_count, valid_count
+    
+    task_uuid = str(uuid.uuid4())
+
+    try:
+        request_count += 1
+        if not validate_file_size(file):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024)}MB"
+            )
+
+    
+        if doc_type not in collection:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported document type"
+            )
+
+
+        start_time = time.perf_counter()
+        file_ext = get_file_extension(file.filename)
+        images_to_analyze: List[str] = []
+        logger.info(f"[Task: {task_uuid}] Processing file: {file.filename} as {doc_type}")
+
+        if file_ext == ".jpg":
+            base64 = image_to_base64(file)
+            images_to_analyze.append(f"data:image/jpg;base64,{base64}")
+
+        elif file_ext == ".jpeg":
+            base64 = image_to_base64(file)
+            images_to_analyze.append(f"data:image/jpeg;base64,{base64}")
+
+        elif file_ext == ".bmp":
+            base64 = image_to_base64(file)
+            images_to_analyze.append(f"data:image/bmp;base64,{base64}")
+
+        elif file_ext == ".pdf":
+            images_to_analyze = pdf_to_images(file, max_pages=5)
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type"
+            )
+
+        vllm_result = await analyze_images(images_to_analyze, doc_type)
+        if SAVE_INVALID_FILES and vllm_result is None:
+            save_uploaded_file(file, f"{task_uuid}{file_ext}")
+
+        if vllm_result is None:
+            invalid_count += 1
+        else:
+            valid_count += 1
+
+        end_time = time.perf_counter()
+        processing_time = end_time - start_time
+
+        return JSONResponse(content={
+            "success": True,
+            "processing_time": processing_time,
+            "result": vllm_result
+        })
+
+    except HTTPException as er:
+        logger.error(f"[Task: {task_uuid}]. Error processing file: {str(er)}", exc_info=True)
+        raise er
+
+    except Exception as e:
+        logger.error(f"[Task: {task_uuid}]. Error processing file: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to process file")
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "accepted": ".jpg, .jpeg, .bmp, .pdf",
+        "requests": request_count,
+        "valid": valid_count,
+        "invalid": invalid_count,
+        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=6060)

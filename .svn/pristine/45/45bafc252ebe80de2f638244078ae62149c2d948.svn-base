@@ -33,24 +33,15 @@ services:
     image: vllm/vllm-openai:latest
     container_name: doc_parser-vllm_gemma
     command: >
-      --model=Qwen/Qwen3-VL-2B-Instruct
+      --model=google/gemma-3n-E2B-it
+      --tensor-parallel-size=1
       --gpu-memory-utilization=0.95
-      --max-num-seqs=2
-      --max-model-len=4096
-      --dtype=half
-      --trust-remote-code
-      --generation-config=auto
-      --override-generation-config='{"temperature": 0.0, "top_k": 20, "top_p": 0.8}'
-      --mm-processor-kwargs='{"min_pixels": 784, "max_pixels": 1003520, "fps": 1}'
+      --max-num-seqs=8
     volumes:
       - doc_parser_hf_cache:/root/.cache/huggingface
     environment:
       - HUGGING_FACE_HUB_TOKEN=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
       - VLLM_LOGGING_LEVEL=DEBUG
-      - VLLM_USE_FLASHINFER_SAMPLER=0
-      - TEMPERATURE=0.0
-      - TOP_K=20
-      - TOP_P=0.8
     ipc: host
     deploy:
       resources:

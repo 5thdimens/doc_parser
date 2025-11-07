@@ -5,7 +5,7 @@ from typing import List, Optional
 import os
 import uuid
 from pathlib import Path
-from PIL import Image, ImageOps
+from PIL import Image
 import pdf2image
 import logging
 import base64
@@ -21,79 +21,173 @@ from enum import Enum
 import json
 from typing import Optional
 import re
-import yaml
-import shutil
 
 
-class DocParserException(Exception):
-    def __init__(self, status_code: int, error: str, task_id: str):
-        self.status_code = status_code
-        self.error = error
-        self.taskId = task_id
+PASSPORT = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('passport' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"country": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"passport_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+NATIONAL_ID = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kenya_national_id' or 'other')",
+	"name": "string",
+	"gender": "string",
+	"date_of_birth": "string (usualy is the date with the smallest year)",
+	"id_number": "string (usualy 8 digit number)",
+  "serial_number": "string (usually 9 digit number)",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+MILITARY_ID = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('military_id' or 'other')",
+	"name": "string",
+  "service_number": "string",
+  "rank": "string",
+  "service": "string",
+  "height": "string",
+  "blood_group": "string",
+  "national_id": "string (usualy 8 digit number)",
+  "date_of_issue": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
 
 
 
+KRA_PIN = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('kra_pin' or 'other')",
+	"pin": "string",
+  "email": "string",
+  "phone": "string",
+  "po_box": "string",
+  "postal_code": "string",
+  "county": "string",
+  "district": "string",
+  "city": "string",
+  "street": "string",
+  "building": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
 
-def load_prompts(config_path: str = "prompts.yaml"):
-  with open(config_path, 'r', encoding='utf-8') as file:
-    config = yaml.safe_load(file)
-  return config
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
 
-prompt_config = load_prompts()
 
-print('system ', prompt_config['system'])
-print('identification ', prompt_config['identification'])
-print('certificate ', prompt_config['certificate'])
-print('kra_pin ', prompt_config['kra_pin'])
-print('ownership ', prompt_config['ownership'])
+CERT_OF_REG = '''
+You MUST return your output in the following JSON format:
+{
+	"document_type": "string ('certificate_of_registration' or 'other')",
+	"business_name": "string",
+  "country": "string",
+  "registration_number": "string",
+	"confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
 
-ownership_doc_types = ['title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter', 'certificate_of_title', 'certificate_of_ownership', 'plot_certificate', 'certificate_of_lease']
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+CERT_OF_INCORP = '''
+You MUST return your output in the following JSON format:
+{
+  "document_type": "string ('certificate_of_incorporation' or 'other')",
+  "business_name": "string",
+  "country": "string",
+  "registration_number": "string",
+  "confidence_score": "float (on a scale of 0.0 to 1.0)"
+}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
+
+OWNERSHIP_DOCUMENTS = ['title_deed', 'lease_agreement', 'shares_certificate', 'allotment_letter', 'certificate_of_title', 'certificate_of_ownership', 'plot_certificate', 'certificate_of_lease']
+OWNERSHIP_ALLOWED = "', '".join(OWNERSHIP_DOCUMENTS)
+OWNERSHIP_CERT = f'''
+You MUST return your output in the following JSON format:
+{{
+  "document_type": "string ('{OWNERSHIP_ALLOWED}' or 'other')",
+  "title_number": "string (you MUST include only values from field 'Title No.' or 'Title Number')",
+  "parcel_number": "string (you MUST include only values from field 'Parcel No.')",
+  "plot_number": "string (you MUST include only values from field 'proprietor of plot No.')",
+  "land_registry": "string (you MUST include only values from field 'L.R. NO.')",
+  "confidence_score": "float (on a scale of 0.0 to 1.0)"
+}}
+
+Please analyze this image and generate the JSON. In case a field is missing, field value should be empty or null.
+'''
+
+
 
 collection = {
-  "DT0002": {
-    "doc_type": ["national_id"], 
-    "prompt": prompt_config['identification']
-  },
-  "DT0049": {
-    "doc_type": ["passport"], 
-    "prompt": prompt_config['identification']
-  },
-  "DT0081": {
-    "doc_type": ["military_id"], 
-    "prompt": prompt_config['identification']
-  },
-  "DT0030": {
-    "doc_type": ["certificate_of_registration"], 
-    "prompt": prompt_config['certificate']
-  },
-  "DT0075": {
-    "doc_type": ["certificate_of_incorporation"], 
-    "prompt": prompt_config['certificate']
-  },
-  "DT0074": {
-    "doc_type": ["taxpayer_registration_certificate", "pin_certificate"], 
-    "prompt": prompt_config['kra_pin']
-  },
-  "DT0083": {
-    "doc_type": ["taxpayer_registration_certificate", "pin_certificate"], 
-    "prompt": prompt_config['kra_pin']
-  },
-  "DT0076": {
-    "doc_type": ownership_doc_types, 
-    "prompt": prompt_config['ownership']
-  },
-  "DT0077": {
-    "doc_type": ownership_doc_types, 
-    "prompt": prompt_config['ownership']
-  },
-  "DT0078": {
-    "doc_type": ownership_doc_types, 
-    "prompt": prompt_config['ownership']
-  },
-  "DT0079": {
-    "doc_type": ownership_doc_types, 
-    "prompt": prompt_config['ownership']
-  }
+    "DT0002": {
+        "doc_type": "kenya_national_id", 
+        "prompt": NATIONAL_ID
+    },
+    "DT0049": {
+        "doc_type": "passport", 
+        "prompt": PASSPORT
+    },
+    "DT0081": {
+        "doc_type": "military_id", 
+        "prompt": MILITARY_ID
+    },
+    "DT0030": {
+        "doc_type": "certificate_of_registration", 
+        "prompt": CERT_OF_REG
+    },
+    "DT0075": {
+        "doc_type": "certificate_of_incorporation", 
+        "prompt": CERT_OF_INCORP
+    },
+    "DT0074": {
+        "doc_type": "kra_pin", 
+        "prompt": KRA_PIN
+    },
+    "DT0083": {
+        "doc_type": "kra_pin", 
+        "prompt": KRA_PIN
+    },
+    "DT0076": {
+        "doc_type": "ownership", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0077": {
+        "doc_type": "ownership", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0078": {
+        "doc_type": "ownership", 
+        "prompt": OWNERSHIP_CERT
+    },
+    "DT0079": {
+        "doc_type": "ownership", 
+        "prompt": OWNERSHIP_CERT
+    }
 }
 
 
@@ -114,11 +208,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS middleware
 app.add_middleware(
-  CORSMiddleware,
-  allow_origins=["*"],
-  allow_credentials=True,
-  allow_methods=["*"],
-  allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Configuration
@@ -129,7 +223,7 @@ ERROR_DIR = UPLOAD_DIR / "error"
 
 # Create directories
 for directory in [INVALID_DIR, ERROR_DIR]:
-  directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
 
 
 
@@ -141,6 +235,9 @@ SAVE_INVALID_FILES: bool = os.getenv("SAVE_INVALID_FILES", "true") == "true"
 # Allowed file types
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".bmp", ".pdf"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+SYSTEM_PROMPT = "You are a reliable data extraction engine. Your sole purpose is to analyze the provided image and extract information. Your entire response must be a single, valid JSON object, and you must include **no other text, explanations, or conversational filler**."
 
 
 def get_error_details(error: str, task_id: str):
@@ -166,20 +263,12 @@ def save_uploaded_file(file: UploadFile, filename: str):
     """Save uploaded file with unique name"""
     
     try:
-        disk_usage = shutil.disk_usage(INVALID_DIR)
-        available_space_gb = disk_usage.free / (1024 ** 3)  # Convert bytes to GB
-        
-        if available_space_gb < 5:
-            error_msg = f"Insufficient storage space: {available_space_gb:.2f}GB available (minimum 5GB required)"
-            logger.error(f"Failed to save file {filename}: {error_msg}", exc_info=True)
-        
-
         file_path = INVALID_DIR / filename
         with open(file_path, "wb") as buffer:
           buffer.write(file.file.read())
 
     except Exception as e:
-        logger.error(f"Failed to save file {filename}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to save uploaded file {filename}: {str(e)}", exc_info=True)
 
     remove_files_older_than(INVALID_DIR)
 
@@ -202,38 +291,9 @@ def remove_files_older_than(directory, days=30):
         logger.error(f"Failed to clean invalid files: {str(e)}", exc_info=True)
 
 
-def preprocess_document_image(image_path, min_short_side=800, max_long_side=1600):
-    img = Image.open(image_path).convert("RGB")
-    
-    # Auto-contrast for better text clarity
-    img = ImageOps.autocontrast(img, cutoff=2)
-    
-    # Resize while preserving aspect ratio
-    w, h = img.size
-    scale = min(
-        max_long_side / max(w, h),
-        min_short_side / min(w, h),
-        1.0  # don't upscale
-    )
-    new_w, new_h = int(w * scale), int(h * scale)
-    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-    
-    return img
-
-
-def image_to_base64(file: UploadFile, format: str) -> str:
+def image_to_base64(file: UploadFile) -> str:
     try:
-        image_data = file.file.read()
-        image = Image.open(BytesIO(image_data))
-        image = ImageOps.autocontrast(image, cutoff=2)
-
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-
-        buffer = BytesIO()
-        image.save(buffer, format=format)
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
-
+        return base64.b64encode(file.file.read()).decode('utf-8')
     except Exception as e:
         logger.error(f"Image encoding failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Image encoding failed")
@@ -241,13 +301,8 @@ def image_to_base64(file: UploadFile, format: str) -> str:
 
 def pil_image_to_base64(image: Image) -> str:
     try:
-        image = ImageOps.autocontrast(image, cutoff=2)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-
         buffer = BytesIO()
-        image.save(buffer, format="JPEG")
-
+        image.save(buffer, format="PNG")
         img_bytes = buffer.getvalue()
         return base64.b64encode(img_bytes).decode('utf-8')
     except Exception as e:
@@ -258,11 +313,13 @@ def pil_image_to_base64(image: Image) -> str:
 def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[str]:
     
     try:
-        file_content = file.file.read()
+        buffer = BytesIO()
+        file.save(buffer)
+        bytes = buffer.getvalue()
         images = pdf2image.convert_from_bytes(
-            file_content,
-            dpi=200,
-            fmt='jpeg'
+            bytes,
+            dpi=300,
+            fmt='png'
         )
         
         # Limit to max_pages if specified
@@ -275,7 +332,7 @@ def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[str]:
         result = []
         for img in images:
             base64 = pil_image_to_base64(img)
-            result.append(f"data:image/jpeg;base64,{base64}")
+            result.append(f"data:image/png;base64,{base64}")
 
         return result
         
@@ -287,18 +344,16 @@ def pdf_to_images(file: UploadFile, max_pages: int = None) -> List[str]:
 
 def get_gender(arg):
     if isinstance(arg, str):
-      gender = arg.strip().lower()
-      if gender.startswith("f") or "fem" in gender:
+      if arg.lower().startswith("f") or "fem" in arg.lower():
         return "FEMALE"
-      elif gender.startswith("m") or "male" in gender:
+      elif arg.lower().startswith("m") or "male" in arg.lower():
         return "MALE"
-
     return None
 
 
 def get_score(arg):
     if arg is None:
-        return 95
+        return None
     try:
         return float(arg)
     except (ValueError, TypeError):
@@ -311,23 +366,12 @@ def get_doc_number(arg):
     return None
 
 
-def get_id_number(arg):
-    if isinstance(arg, str):
-        return re.sub(r'[^0-9]', '', arg)
-    return None
-
-
 def get_date(arg):
 
     try:
         if isinstance(arg, str):
-            date = re.sub(r'[^a-zA-Z0-9 \.\-/]', '', arg)
-            if bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date)):
-                dt = datetime.strptime(date, "%Y-%m-%d")
-                return int(dt.timestamp()) * 1000
-
-            date = date.lower()
-            alpha = re.sub(r'[^a-zA-Z]', '', date)
+            date = re.sub(r'[^a-zA-Z0-9 \.-]', '', arg)
+            alpha = re.sub(r'[^a-zA-Z]', '', date).lower()
             if alpha:
                 if alpha.startswith('jan') or 'jan' in alpha:
                     date = date.replace(alpha, "01")
@@ -354,7 +398,7 @@ def get_date(arg):
                 elif alpha.startswith('dec') or 'dec' in alpha:
                     date = date.replace(alpha, "12")
 
-            date = date.replace(" ", ".").replace("-", ".").replace("/", ".")
+            date = date.replace(" ", ".").replace("-", ".")
             dt = datetime.strptime(date, "%d.%m.%Y")
             return int(dt.timestamp()) * 1000
 
@@ -366,13 +410,14 @@ def get_date(arg):
 
 def get_country(arg):
     if isinstance(arg, str):
-        return re.sub(r'[^a-zA-Z ]', '', arg).upper()
+        return re.sub(r'[^a-zA-Z]', '', arg).upper()
     return None
 
 
 def get_po_box(arg):
     if isinstance(arg, str):
-        return re.sub(r'[^0-9 -]', '', arg)
+        code = re.sub(r'[^0-9]', '', arg)[0:6]
+        return f"P.O. Box {code}"
     return None
 
 
@@ -381,17 +426,6 @@ def get_postal_code(arg):
         return re.sub(r'[^0-9]', '', arg)[0:6]
     return None
 
-
-def get_email(arg):
-    if isinstance(arg, str) and '@' in arg:
-        return arg.strip()
-    return None
-
-
-def get_phone_number(arg):
-    if isinstance(arg, str):
-        return re.sub(r'[^+0-9]', '', arg)
-    return None
 
 def get_name(name):
     first = ""
@@ -420,181 +454,137 @@ def get_name(name):
 
 def get_passport_data(response: dict) -> dict:
 
-    if response is None:
-        return None
-    
     first, middle, last = get_name(response.get("name"))
     gender = get_gender(response.get("gender"))
     country = get_country(response.get("country"))
-    date_of_birth = get_date(response.get("date_of_birth"))
-    passport_number = get_doc_number(response.get("passport_number"))
-    confidence_score = get_score(response.get("confidence_score"))
+    dateOfBirth = get_date(response.get("date_of_birth"))
+    passportNumber = get_doc_number(response.get("passport_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
 
-    if passport_number is None or len(passport_number) < 7 or len(passport_number) > 12:
+    if passportNumber is None or len(passportNumber) == 0:
         return None
 
     return {
         "firstName": first,
         "middleName": middle,
         "lastName": last,
-        "documentNumber": passport_number,
+        "documentNumber": passportNumber,
         "documentType": "30000CUSDO",
         "country": country,
         "gender": gender,
-        "birthDate": date_of_birth,
-        "confidenceScore": confidence_score
+        "birthDate": dateOfBirth,
+        "confidenceScore": confidenceScore
     }
 
 
 def get_national_id_data(response: dict) -> dict:
 
-    if response is None:
-        return None
-    
     first, middle, last = get_name(response.get("name"))
     gender = get_gender(response.get("gender"))
-    date_of_birth = get_date(response.get("date_of_birth"))
-    id_number = get_id_number(response.get("id_number"))
-    confidence_score = get_score(response.get("confidence_score"))
-    country = response.get("country")
-    if isinstance(country, str) and "ken" not in country.lower():
-        return None
+    dateOfBirth = get_date(response.get("date_of_birth"))
+    idNumber = get_doc_number(response.get("id_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
 
-    if id_number is None or len(id_number) < 7 or len(id_number) > 14:
+    if idNumber is None or len(idNumber) == 0:
         return None
 
     return {
         "firstName": first,
         "middleName": middle,
         "lastName": last,
-        "documentNumber": id_number,
+        "documentNumber": idNumber,
         "documentType": "20000CUSDO",
         "country": "KENYA",
         "gender": gender,
-        "birthDate": date_of_birth,
-        "confidenceScore": confidence_score
+        "birthDate": dateOfBirth,
+        "confidenceScore": confidenceScore
     }
 
 
 def get_military_id_data(response: dict) -> dict:
 
-    if response is None:
-        return None
-    
     first, middle, last = get_name(response.get("name"))
-    id_number = get_id_number(response.get("id_number"))
-    confidence_score = get_score(response.get("confidence_score"))
+    idNumber = get_doc_number(response.get("national_id"))
+    confidenceScore = get_score(response.get("confidence_score"))
 
-    if id_number is None or len(id_number) < 7 or len(id_number) > 14:
+    if idNumber is None or len(idNumber) == 0:
         return None
 
     return {
         "firstName": first,
         "middleName": middle,
         "lastName": last,
-        "documentNumber": id_number,
+        "documentNumber": idNumber,
         "documentType": "40000CUSDO",
         "country": "KENYA",
         "gender": "MALE",
         "birthDate": None,
-        "confidenceScore": confidence_score
+        "confidenceScore": confidenceScore
     }
 
 
 def get_reg_certificate_data(response: dict) -> dict:
 
-    if response is None:
-        return None
-    
-    doc_title = response.get("document_title")
-    if isinstance(doc_title, str) and not re.search(r'CERTIFICATE OF REGISTRATION', doc_title, re.IGNORECASE):
-        return None
-    
-    business_name = response.get("business_name")
+    businessName = response.get("business_name")
     country = get_country(response.get("country"))
-    registration_number = get_doc_number(response.get("registration_number"))
-    confidence_score = get_score(response.get("confidence_score"))
+    registrationNumber = get_doc_number(response.get("registration_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
 
-    if registration_number is None or len(registration_number) == 0:
+    if registrationNumber is None or len(registrationNumber) == 0:
         return None
 
     return {
-        "businessName": business_name,
-        "documentNumber": registration_number,
+        "businessName": businessName,
+        "documentNumber": registrationNumber,
         "documentType": "60000CUSDO",
         "country": country,
-        "confidenceScore": confidence_score
+        "confidenceScore": confidenceScore
     }
 
 
 def get_inc_certificate_data(response: dict) -> dict:
 
-
-    if response is None:
-        return None
-    
-    doc_title = response.get("document_title")
-    if isinstance(doc_title, str) and not re.search(r'CERTIFICATE OF INCORPORATION', doc_title, re.IGNORECASE):
-        return None
-    
-    business_name = response.get("business_name")
+    businessName = response.get("business_name")
     country = get_country(response.get("country"))
-    registration_number = get_doc_number(response.get("registration_number"))
-    confidence_score = get_score(response.get("confidence_score"))
+    registrationNumber = get_doc_number(response.get("registration_number"))
+    confidenceScore = get_score(response.get("confidence_score"))
 
-    if registration_number is None or len(registration_number) == 0:
+    if registrationNumber is None or len(registrationNumber) == 0:
         return None
 
     return {
-        "businessName": business_name,
-        "documentNumber": registration_number,
+        "businessName": businessName,
+        "documentNumber": registrationNumber,
         "documentType": "61000CUSDO",
         "country": country,
-        "confidenceScore": confidence_score
+        "confidenceScore": confidenceScore
     }
 
 
-def get_kra_data(response: dict, doc_type: str) -> dict:
+def get_kra_pin_data(response: dict) -> dict:
 
-    if response is None:
-        return None
-    
-    doc_title = response.get("document_title")
-    if isinstance(doc_title, str):
-        if doc_type == "taxpayer_registration_certificate" and not re.search(r'Taxpayer Registration Certificate', doc_title, re.IGNORECASE):
-            return None
-        if doc_type == "pin_certificate" and not re.search(r'PIN Certificate', doc_title, re.IGNORECASE):
-            return None
-    
-    confidence_score = get_score(response.get("confidence_score"))
-    kra_pin = get_doc_number(response.get("pin"))
-    email = get_email(response.get("email"))
-    phone = get_phone_number(response.get("phone"))
-    po_box = get_po_box(response.get("po_box"))
-    postal_code = get_postal_code(response.get("postal_code"))
+    confidenceScore = get_score(response.get("confidence_score"))
+    kraPin = get_doc_number(response.get("pin"))
+    email = response.get("email")
+    phone = response.get("phone")
+    poBox = get_po_box(response.get("po_box"))
+    postalCode = get_postal_code(response.get("postal_code"))
 
-    if doc_type == "taxpayer_registration_certificate" and isinstance(po_box, str):
-        if '-' in po_box:
-            parts = po_box.split(" - ")
-            if len(parts) == 2:
-                po_box = parts[0].strip()
-                postal_code = parts[1].strip()
-
-    if kra_pin is None or len(kra_pin) < 10 or len(kra_pin) > 14:
+    if kraPin is None or len(kraPin) == 0:
         return None
 
     return {
-        "kraPin": kra_pin,
+        "kraPin": kraPin,
         "email": email,
         "phone": phone,
-        "poBox": f"P.O. Box {po_box}" if po_box is not None else po_box,
-        "postalCode": postal_code,
+        "poBox": poBox,
+        "postalCode": postalCode,
         "county": response.get("county"),
         "district": response.get("district"),
         "city": response.get("city"),
         "street": response.get("street"),
         "building": response.get("building"),
-        "confidenceScore": confidence_score
+        "confidenceScore": confidenceScore
     }
 
 
@@ -603,7 +593,7 @@ def find_plot_number(arr: List[str]):
     plot = None
 
     for item in arr:
-        if isinstance(item, str) and '/' in item:
+        if '/' in item:
             parts = item.split("/")
             if max_slash < len(parts):
                 max_slash = len(parts)
@@ -614,9 +604,6 @@ def find_plot_number(arr: List[str]):
 
 def get_ownership_data(response: dict, vllm_doc_type: str) -> dict:
 
-    if response is None:
-        return None
-    
     title_number = response.get("title_number", "")
     parcel_number = response.get("parcel_number", "")
     plot_number = response.get("plot_number", "")
@@ -643,13 +630,11 @@ def get_ownership_data(response: dict, vllm_doc_type: str) -> dict:
         return None
 
     return {
-        "plotNumber": plot,
-        "confidenceScore": get_score(response.get("confidence_score")),
-        "nationalId": get_id_number(response.get("national_id"))
+        "plot_number": plot
     }
 
 
-async def analyze_images(images: List[str], doc_type: str, task_uuid: str) -> dict:
+async def analyze_images(images: List[str], doc_type: str) -> dict:
 
     try:
         image_contents = []
@@ -670,7 +655,7 @@ async def analyze_images(images: List[str], doc_type: str, task_uuid: str) -> di
                 "content": [
                     {
                         "type": "text", 
-                        "text": prompt_config["system"]
+                        "text": SYSTEM_PROMPT
                     }
                 ]
             },
@@ -694,7 +679,7 @@ async def analyze_images(images: List[str], doc_type: str, task_uuid: str) -> di
         
         payload = {
             "messages": messages,
-            "temperature": 0.0
+            "temperature": 0.1
         }
         
         async with httpx.AsyncClient(timeout=VLLM_TIMEOUT) as client:
@@ -717,37 +702,29 @@ async def analyze_images(images: List[str], doc_type: str, task_uuid: str) -> di
             response = json.loads(content)
 
             vllm_doc_type = response.get("document_type")
-            is_valid = vllm_doc_type in validate_doc_type
+            is_valid = ((vllm_doc_type == validate_doc_type) or (validate_doc_type == "ownership" and vllm_doc_type in OWNERSHIP_DOCUMENTS))
             extracted_data = None
             if is_valid:
-                data = response.get("data")
-                if vllm_doc_type == "passport":
-                    extracted_data = get_passport_data(data)
+                if validate_doc_type == "passport":
+                    extracted_data = get_passport_data(response)
 
-                elif vllm_doc_type == "national_id":
-                    extracted_data = get_national_id_data(data)
+                elif validate_doc_type == "kenya_national_id":
+                    extracted_data = get_national_id_data(response)
 
-                elif vllm_doc_type == "military_id":
-                    extracted_data = get_military_id_data(data)
+                elif validate_doc_type == "military_id":
+                    extracted_data = get_military_id_data(response)
 
-                elif vllm_doc_type == "taxpayer_registration_certificate" or vllm_doc_type == "pin_certificate":
-                    extracted_data = get_kra_data(data, vllm_doc_type)
+                elif validate_doc_type == "kra_pin":
+                    extracted_data = get_kra_pin_data(response)
 
-                elif vllm_doc_type == "certificate_of_registration":
-                    extracted_data = get_reg_certificate_data(data)
+                elif validate_doc_type == "certificate_of_registration":
+                    extracted_data = get_reg_certificate_data(response)
 
-                elif vllm_doc_type == "certificate_of_incorporation":
-                    extracted_data = get_inc_certificate_data(data)
+                elif validate_doc_type == "certificate_of_incorporation":
+                    extracted_data = get_inc_certificate_data(response)
 
-                elif vllm_doc_type in ownership_doc_types:
-                    extracted_data = get_ownership_data(data, vllm_doc_type)
-
-
-            if is_valid and extracted_data is None:
-                logger.error(f"Unable to extract data from VLLM response for task: {task_uuid} \nResponse: {content}")
-            elif not is_valid:
-                logger.error(f"Invalid document type from VLLM response for task: {task_uuid} \nResponse: {content}")
-
+                elif validate_doc_type == "ownership":
+                    extracted_data = get_ownership_data(response, vllm_doc_type)
 
             return extracted_data, is_valid
             
@@ -773,17 +750,6 @@ def avg_processing_time():
     avg = sum(process_time_history) / total
     return total, avg
 
-
-
-@app.exception_handler(DocParserException)
-async def doc_parser_exception_handler(request: Request, exc: DocParserException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.error,
-            "taskId": exc.taskId
-        }
-    )
 
 
 @app.post("/process")
@@ -813,15 +779,15 @@ async def process_file(
         logger.info(f"[Task: {task_uuid}] Processing file: {file.filename} as {doc_type}")
 
         if file_ext == ".jpg":
-            base64 = image_to_base64(file, "JPEG")
+            base64 = image_to_base64(file)
             images_to_analyze.append(f"data:image/jpg;base64,{base64}")
 
         elif file_ext == ".jpeg":
-            base64 = image_to_base64(file, "JPEG")
+            base64 = image_to_base64(file)
             images_to_analyze.append(f"data:image/jpeg;base64,{base64}")
 
         elif file_ext == ".bmp":
-            base64 = image_to_base64(file, "BMP")
+            base64 = image_to_base64(file)
             images_to_analyze.append(f"data:image/bmp;base64,{base64}")
 
         elif file_ext == ".pdf":
@@ -833,7 +799,7 @@ async def process_file(
                 detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
             )
 
-        vllm_result, is_valid = await analyze_images(images_to_analyze, doc_type, task_uuid)
+        vllm_result, is_valid = await analyze_images(images_to_analyze, doc_type)
         if SAVE_INVALID_FILES and vllm_result is None:
             save_uploaded_file(file, f"{doc_type}_{task_uuid}{file_ext}")
 
@@ -856,12 +822,11 @@ async def process_file(
 
     except HTTPException as er:
         logger.error(f"[Task: {task_uuid}]. Error processing file: {str(er)}", exc_info=True)
-        raise DocParserException(status_code=er.status_code, error=str(er.detail), task_id=task_uuid)
-    
+        raise HTTPException(status_code=er.status_code, detail=get_error_details(error=str(er.detail), task_id=task_uuid))
+
     except Exception as e:
         logger.error(f"[Task: {task_uuid}]. Error processing file: {str(e)}", exc_info=True)
-        raise DocParserException(status_code=500, error="Failed to process file", task_id=task_uuid)
-
+        raise HTTPException(status_code=500, detail=get_error_details(error="Failed to process file", task_id=task_uuid))
 
 
 @app.get("/health")
