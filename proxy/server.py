@@ -202,12 +202,13 @@ def remove_files_older_than(directory, days=30):
         logger.error(f"Failed to clean invalid files: {str(e)}", exc_info=True)
 
 
-def preprocess_document_image(image_path, min_short_side=800, max_long_side=1600):
-    img = Image.open(image_path).convert("RGB")
-    
+def preprocess_document_image(image, min_short_side=800, max_long_side=1600):
+
     # Auto-contrast for better text clarity
-    img = ImageOps.autocontrast(img, cutoff=2)
-    
+    img = ImageOps.autocontrast(image, cutoff=2)
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+
     # Resize while preserving aspect ratio
     w, h = img.size
     scale = min(
@@ -225,11 +226,7 @@ def image_to_base64(file: UploadFile, format: str) -> str:
     try:
         image_data = file.file.read()
         image = Image.open(BytesIO(image_data))
-        image = ImageOps.autocontrast(image, cutoff=2)
-
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-
+        image = preprocess_document_image(image)
         buffer = BytesIO()
         image.save(buffer, format=format)
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
@@ -241,9 +238,7 @@ def image_to_base64(file: UploadFile, format: str) -> str:
 
 def pil_image_to_base64(image: Image) -> str:
     try:
-        image = ImageOps.autocontrast(image, cutoff=2)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+        image = preprocess_document_image(image)
 
         width, height = image.size
         logger.info(f"Image size: {width} x {height}")
