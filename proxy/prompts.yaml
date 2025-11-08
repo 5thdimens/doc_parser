@@ -11,7 +11,8 @@ identification: |
        - Identify the document as EXACTLY one of: 
          "passport", "national_id", "driver_license", "military_id" or "other"
        - If uncertain, default to "other"
-    
+       - If document includes text "jamhuri ya kenya" then document **IS CERTAINLY OF TYPE NATIONAL ID**
+
     2. **Data Extraction** (only include fields present in the document):
        - For **passport**:
          {
