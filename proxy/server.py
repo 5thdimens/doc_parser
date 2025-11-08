@@ -310,6 +310,12 @@ def get_doc_number(arg):
     return None
 
 
+def get_certificate_number(arg):
+    if isinstance(arg, str):
+        return re.sub(r'[^a-zA-Z0-9/\-]', '', arg)
+    return None
+
+
 def get_id_number(arg):
     if isinstance(arg, str):
         return re.sub(r'[^0-9]', '', arg)
@@ -526,7 +532,7 @@ def get_reg_certificate_data(response: dict) -> dict:
     
     business_name = response.get("business_name")
     country = get_country(response.get("country"))
-    registration_number = get_doc_number(response.get("registration_number"))
+    registration_number = get_certificate_number(response.get("registration_number"))
     confidence_score = get_score(response.get("confidence_score"))
 
     if registration_number is None or len(registration_number) == 0:
@@ -553,7 +559,7 @@ def get_inc_certificate_data(response: dict) -> dict:
     
     business_name = response.get("business_name")
     country = get_country(response.get("country"))
-    registration_number = get_doc_number(response.get("registration_number"))
+    registration_number = get_certificate_number(response.get("registration_number"))
     confidence_score = get_score(response.get("confidence_score"))
 
     if registration_number is None or len(registration_number) == 0:
