@@ -588,7 +588,7 @@ def get_kra_data(response: dict, doc_type: str) -> dict:
     
     confidence_score = get_score(response.get("confidence_score"))
     kra_pin = get_doc_number(response.get("pin"))
-    email = get_email(response.get("email"))
+    email = response.get("email")
     phone = get_phone_number(response.get("phone"))
     po_box = get_po_box(response.get("po_box"))
     postal_code = get_postal_code(response.get("postal_code"))
