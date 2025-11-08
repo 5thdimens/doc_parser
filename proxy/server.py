@@ -202,13 +202,14 @@ def remove_files_older_than(directory, days=30):
         logger.error(f"Failed to clean invalid files: {str(e)}", exc_info=True)
 
 
-def preprocess_document_image(image, min_short_side=800, max_long_side=1600):
+def preprocess_document_image(image, min_short_side=1200, max_long_side=1600):
 
     # Auto-contrast for better text clarity
+    img = image
     if img.mode != 'RGB':
         img = img.convert('RGB')
 
-    img = ImageOps.autocontrast(image, cutoff=2)
+    img = ImageOps.autocontrast(img, cutoff=2)
     # Resize while preserving aspect ratio
     w, h = img.size
     scale = min(
