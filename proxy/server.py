@@ -581,9 +581,14 @@ def get_kra_data(response: dict, doc_type: str) -> dict:
     
     doc_title = response.get("document_title")
     if isinstance(doc_title, str):
-        if doc_type == "taxpayer_registration_certificate" and not re.search(r'Taxpayer Registration Certificate', doc_title, re.IGNORECASE):
-            return None
-        if doc_type == "pin_certificate" and not re.search(r'PIN Certificate', doc_title, re.IGNORECASE):
+        tax_reg_cert = re.search(r'Taxpayer Registration Certificate', doc_title, re.IGNORECASE)
+        rev_auth = re.search(r'Kenya Revenue Authority', doc_title, re.IGNORECASE)
+        tax_manag_sys = re.search(r'Tax Management System', doc_title, re.IGNORECASE)
+        pin_cert = re.search(r'PIN Certificate', doc_title, re.IGNORECASE)
+        taxpayer_info = re.search(r'Taxpayer Information', doc_title, re.IGNORECASE)
+        taxpayer_data = re.search(r'Data of the Taxpayer', doc_title, re.IGNORECASE)
+
+        if not tax_reg_cert and not rev_auth and not tax_manag_sys and not pin_cert and not taxpayer_info and not taxpayer_data:
             return None
     
     confidence_score = get_score(response.get("confidence_score"))
